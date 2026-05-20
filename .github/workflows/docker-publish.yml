@@ -1,9 +1,17 @@
 # Rebuild and push Docker images when source code changes.
 # Only rebuilds the specific image(s) whose source files were modified.
+# After pushing, SSHes into the running VMs to pull the new images.
 #
 # Required GitHub Secrets:
 #   DOCKERHUB_USERNAME  — your Docker Hub username
 #   DOCKERHUB_TOKEN     — a Docker Hub Personal Access Token (NOT your password)
+#   SSH_PRIVATE_KEY     — EC2 key pair private key (PEM format)
+#   VM1_PUBLIC_IP       — public IP of the API gateway VM
+#   VM1_PRIVATE_IP      — private IP of VM1 (for workers to reference)
+#   VM2_PRIVATE_IP      — private IP of the caller worker VM
+#   VM3_PRIVATE_IP      — private IP of the inference worker VM
+#   AWS_ACCESS_KEY_ID   — AWS credentials (to temporarily open SSH on the security group)
+#   AWS_SECRET_ACCESS_KEY
 
 name: Build & Push Docker Images
 
@@ -104,3 +112,91 @@ jobs:
           tags: faizanfirdousi/iii-inference-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Step 3: Deploy to running VMs ──
+  # SSHes into each VM, pulls the new image, and restarts the container.
+  # VM2/VM3 are in a private subnet — reached via VM1 as a jump host.
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-and-push]
+    # Only deploy if something was actually built
+    if: >
+      needs.detect-changes.outputs.engine == 'true' ||
+      needs.detect-changes.outputs.caller == 'true' ||
+      needs.detect-changes.outputs.inference == 'true'
+
+    env:
+      AWS_REGION: ap-south-1
+
+    steps:
+      # ── Temporarily allow SSH from this runner's IP ──
+      # The security group only allows SSH from your personal IP.
+      # We add the runner's IP, deploy, then revoke it — no permanently open ports.
+      - name: Get runner public IP
+        id: ip
+        run: echo "ip=$(curl -s https://ifconfig.me)" >> "$GITHUB_OUTPUT"
+
+      - name: Open SSH for runner IP
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          SG_ID=$(aws ec2 describe-security-groups \
+            --region $AWS_REGION \
+            --filters "Name=group-name,Values=alchemyst-inference-api-gateway-sg" \
+            --query "SecurityGroups[0].GroupId" --output text)
+          echo "SG_ID=$SG_ID" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --region $AWS_REGION \
+            --group-id "$SG_ID" \
+            --protocol tcp --port 22 \
+            --cidr "${{ steps.ip.outputs.ip }}/32" \
+            --tag-specifications "ResourceType=security-group-rule,Tags=[{Key=Name,Value=github-actions-temp}]"
+
+      # ── Write SSH key ──
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Trust VM1 host key automatically
+          ssh-keyscan -H ${{ secrets.VM1_PUBLIC_IP }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      # ── Deploy to VM1 (engine + nginx) ──
+      - name: Deploy engine to VM1
+        if: needs.detect-changes.outputs.engine == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ubuntu@${{ secrets.VM1_PUBLIC_IP }} \
+            "cd /opt/app && docker compose -f docker-compose.vm1.yml pull && docker compose -f docker-compose.vm1.yml up -d"
+
+      # ── Deploy to VM2 (caller worker) via VM1 jump host ──
+      - name: Deploy caller worker to VM2
+        if: needs.detect-changes.outputs.caller == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            -J ubuntu@${{ secrets.VM1_PUBLIC_IP }} \
+            ubuntu@${{ secrets.VM2_PRIVATE_IP }} \
+            "cd /opt/app && ENGINE_IP=${{ secrets.VM1_PRIVATE_IP }} docker compose -f docker-compose.vm2.yml pull && ENGINE_IP=${{ secrets.VM1_PRIVATE_IP }} docker compose -f docker-compose.vm2.yml up -d"
+
+      # ── Deploy to VM3 (inference worker) via VM1 jump host ──
+      - name: Deploy inference worker to VM3
+        if: needs.detect-changes.outputs.inference == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            -J ubuntu@${{ secrets.VM1_PUBLIC_IP }} \
+            ubuntu@${{ secrets.VM3_PRIVATE_IP }} \
+            "cd /opt/app && ENGINE_IP=${{ secrets.VM1_PRIVATE_IP }} docker compose -f docker-compose.vm3.yml pull && ENGINE_IP=${{ secrets.VM1_PRIVATE_IP }} docker compose -f docker-compose.vm3.yml up -d"
+
+      # ── Revoke the temporary SSH rule ──
+      - name: Close SSH for runner IP
+        if: always()  # runs even if deploy steps fail
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --region $AWS_REGION \
+            --group-id "$SG_ID" \
+            --protocol tcp --port 22 \
+            --cidr "${{ steps.ip.outputs.ip }}/32"
