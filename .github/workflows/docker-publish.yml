@@ -1,0 +1,106 @@
+# Rebuild and push Docker images when source code changes.
+# Only rebuilds the specific image(s) whose source files were modified.
+#
+# Required GitHub Secrets:
+#   DOCKERHUB_USERNAME  — your Docker Hub username
+#   DOCKERHUB_TOKEN     — a Docker Hub Personal Access Token (NOT your password)
+
+name: Build & Push Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Only run when files that affect Docker images change
+      - 'workers/**'
+      - 'docker/**'
+      - 'config.yaml'
+      - 'iii.lock'
+      - '.iii/**'
+
+jobs:
+  # ── Step 1: Figure out which images need rebuilding ──
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      engine: ${{ steps.filter.outputs.engine }}
+      caller: ${{ steps.filter.outputs.caller }}
+      inference: ${{ steps.filter.outputs.inference }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            engine:
+              - 'config.yaml'
+              - 'iii.lock'
+              - '.iii/**'
+              - 'docker/engine/**'
+            caller:
+              - 'workers/caller-worker/**'
+              - 'docker/caller-worker/**'
+            inference:
+              - 'workers/inference-worker/**'
+              - 'docker/inference-worker/**'
+
+  # ── Step 2: Build & push only the changed images ──
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    # Skip entirely if nothing relevant changed
+    if: >
+      needs.detect-changes.outputs.engine == 'true' ||
+      needs.detect-changes.outputs.caller == 'true' ||
+      needs.detect-changes.outputs.inference == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Log into Docker Hub using repository secrets
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Set up Docker Buildx for better caching
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Engine image ──
+      - name: Build & push iii-engine
+        if: needs.detect-changes.outputs.engine == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/engine/Dockerfile
+          push: true
+          tags: faizanfirdousi/iii-engine:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Caller worker image ──
+      - name: Build & push iii-caller-worker
+        if: needs.detect-changes.outputs.caller == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/caller-worker/Dockerfile
+          push: true
+          tags: faizanfirdousi/iii-caller-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Inference worker image ──
+      - name: Build & push iii-inference-worker
+        if: needs.detect-changes.outputs.inference == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/inference-worker/Dockerfile
+          push: true
+          tags: faizanfirdousi/iii-inference-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

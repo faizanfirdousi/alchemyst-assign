@@ -135,7 +135,9 @@ All services are containerized and pre-built on Docker Hub:
 | `faizanfirdousi/iii-caller-worker`    | 305 MB | Node.js 20 + TypeScript worker                 |
 | `faizanfirdousi/iii-inference-worker` | 2.1 GB | Python 3.11 + PyTorch (CPU) + Qwen3-0.6B model |
 
-### Rebuild Images (optional)
+Images are **automatically rebuilt and pushed** by GitHub Actions when source code changes on `main` (see CI/CD below).
+
+### Rebuild Images Manually (optional)
 
 ```bash
 # From the repo root
@@ -150,10 +152,23 @@ docker push faizanfirdousi/iii-inference-worker:latest
 
 ---
 
+## CI/CD
+
+A GitHub Actions workflow (`.github/workflows/docker-publish.yml`) automatically rebuilds Docker images on push to `main`:
+
+- Uses [dorny/paths-filter](https://github.com/dorny/paths-filter) to detect which source files changed
+- Only rebuilds the **affected image(s)** — e.g., editing `inference_worker.py` only rebuilds the inference worker
+- Docker layer caching via GitHub Actions cache for faster builds
+- Requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets
+
+---
+
 ## Repository Structure
 
 ```
 .
+├── .github/workflows/
+│   └── docker-publish.yml      # CI/CD: auto-build images on push
 ├── config.yaml                 # iii engine configuration
 ├── iii.lock                    # Worker version lock
 ├── workers/
@@ -192,52 +207,20 @@ docker push faizanfirdousi/iii-inference-worker:latest
 
 ## Production Hardening
 
-If this system were going to production, the following changes would be made:
-
-### Security
-
-- **TLS termination** — Add an ALB with ACM certificate for HTTPS, or use Let's Encrypt with Certbot on Nginx. All traffic is currently HTTP.
-- **Authentication** — Add API key or JWT authentication to the inference endpoint. Currently the API is open to anyone.
-- **Secrets management** — Use AWS Secrets Manager or SSM Parameter Store instead of environment variables for sensitive configuration.
-- **Container scanning** — Run Trivy or Snyk on Docker images in CI to catch CVEs before deployment.
-- **SSH hardening** — Replace SSH key access with AWS SSM Session Manager (no open port 22, no key management, full audit trail).
-
-### Reliability
-
-- **Health check integration** — Wire the `/health` endpoint into an ALB target group with automatic unhealthy instance replacement.
-- **Auto-restart** — Docker `restart: unless-stopped` handles container crashes, but instance-level failures need an ASG (Auto Scaling Group) with min=1.
-- **Persistent state** — The iii engine's state store (`state_store.db`) is on an ephemeral Docker volume. Move to EBS or RDS for durability.
-- **Logging** — Ship container logs to CloudWatch Logs or ELK via Fluent Bit. Currently logs are only visible via `docker logs`.
-- **Monitoring** — Add Prometheus + Grafana for metrics (request latency, model inference time, error rate). The iii engine already exposes OpenTelemetry data.
-
-### Performance
-
-- **Connection pooling** — Nginx `upstream` with keepalive connections to reduce TCP overhead.
-- **Response caching** — Cache identical prompts in Redis for repeated queries (same input → same output for temperature=0).
-- **Request queuing** — Add SQS between the HTTP layer and inference workers to handle burst traffic without dropping requests.
+- **HTTPS** — ALB + ACM certificate or Let's Encrypt on Nginx. All traffic is currently unencrypted HTTP.
+- **Auth** — API key or JWT on the inference endpoint; currently open to anyone.
+- **Secrets** — Move sensitive config from env vars to AWS Secrets Manager / SSM Parameter Store.
+- **Observability** — Ship logs to CloudWatch via Fluent Bit; add Prometheus + Grafana for latency and error-rate dashboards (iii already exposes OpenTelemetry).
+- **Instance resilience** — Wrap each EC2 in an ASG (min=1) so failed instances are auto-replaced; move the engine's `state_store.db` to an EBS volume.
 
 ---
 
 ## Scaling to 100x Larger Models
 
-If the model were 100x larger (e.g., 60B parameters instead of 600M):
+For a 60B-parameter model (~120 GB in FP16):
 
-### Compute
-
-- **GPU instances required** — A 60B model in FP16 needs ~120GB VRAM. Use `p4d.24xlarge` (8x A100 80GB) or `p5.48xlarge` (8x H100) with tensor parallelism across GPUs.
-- **Model sharding** — Use frameworks like vLLM, TGI (Text Generation Inference), or DeepSpeed to shard the model across multiple GPUs. Single-GPU won't fit.
-- **Spot instances** — For non-latency-critical inference, use Spot Instances at 60-90% discount with graceful fallback to on-demand.
-
-### Architecture
-
-- **Queue-based inference** — Replace synchronous RPC with an SQS/Redis queue. Clients submit requests and poll for results. This decouples the API tier from inference latency (which could be 10-30s for a 60B model).
-- **Horizontal scaling** — Run multiple inference worker replicas behind the iii engine. The engine's RPC mesh already supports multiple workers registering the same function — it load-balances across them.
-- **Model caching** — Store model weights on EFS (shared filesystem) instead of baking into Docker images. A 120GB Docker image is impractical to push/pull.
-- **Inference optimization** — Use quantization (GPTQ, AWQ) to reduce memory footprint by 2-4x. A 60B model in 4-bit quantization fits in ~30GB VRAM (one A100).
-
-### Infrastructure
-
-- **Multi-AZ** — Deploy across multiple availability zones for high availability.
-- **CDN** — Put CloudFront in front of the API for global latency reduction and DDoS protection.
-- **Autoscaling** — Use Kubernetes (EKS) with KEDA for GPU-aware autoscaling based on queue depth.
-- **Cost optimization** — Reserved Instances for baseline capacity + Spot for burst. Monitor with AWS Cost Explorer and set billing alerts.
+- **GPU instances** — `p4d.24xlarge` (8× A100 80 GB) with tensor parallelism; serve via vLLM or TGI for batched inference.
+- **Quantization** — 4-bit GPTQ/AWQ cuts VRAM to ~30 GB, fitting on a single A100.
+- **Async queue** — Replace synchronous RPC with SQS/Redis; clients submit and poll, decoupling the API tier from 10-30 s inference latency.
+- **Model storage** — Keep weights on EFS instead of baking a 120 GB Docker image; workers pull at boot.
+- **Autoscaling** — EKS + KEDA for GPU-aware scaling by queue depth; Spot Instances for burst capacity at 60-90 % discount.
