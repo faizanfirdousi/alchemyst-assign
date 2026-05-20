@@ -1,0 +1,8 @@
+# Example terraform.tfvars — copy and edit with your values
+# Usage: cp terraform.tfvars.example terraform.tfvars
+
+aws_region   = "ap-south-1"
+key_name     = "your-key-pair-name"
+my_ip        = "YOUR_PUBLIC_IP/32"  # Run: curl -s ifconfig.me
+github_repo  = "https://github.com/faizanfirdousi/alchemyst-assign.git"
+dockerhub_user = "faizanfirdousi"
