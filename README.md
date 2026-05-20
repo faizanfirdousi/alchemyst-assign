@@ -23,10 +23,10 @@ A production-grade deployment of a distributed SLM (Small Language Model) infere
 
 ### Network Setup
 - The project runs across three virtual machines hosted on AWS in the Mumbai region (ap-south-1). To keep things secure and organized, all three VMs live inside a dedicated private network (iii-vpc) that is completely isolated from everything else on AWS.
-- VM-1 (the API gateway) sits in a public subnet — it's the only machine directly reachable from the internet. It handles incoming HTTP requests on port 80 and communicates with the worker VMs internally over WebSocket on port 49134.
-- VM-2 and VM-3 (the workers) sit in a private subnet — they have no public IP and cannot be accessed directly from the internet. They can only be reached from within the VPC, specifically from VM-1. This ensures the workers are never exposed externally.
-- Even though the workers are private, they still need outbound internet access to do things like download the model or install packages during setup. This is handled by a NAT Gateway sitting in the public subnet — it lets private VMs initiate outbound connections to the internet, while blocking any unsolicited inbound traffic from reaching them.
-- SSH access is also locked down by design — VM-1 can be SSHed into directly from your local machine, and VM-2/VM-3 can only be SSHed into by going through VM-1 (acting as a jump/bastion host).
+- VM-1 (the API gateway) sits in a public subnet - it's the only machine directly reachable from the internet. It handles incoming HTTP requests on port 80 and communicates with the worker VMs internally over WebSocket on port 49134.
+- VM-2 and VM-3 (the workers) sit in a private subnet - they have no public IP and cannot be accessed directly from the internet. They can only be reached from within the VPC, specifically from VM-1. This ensures the workers are never exposed externally.
+- Even though the workers are private, they still need outbound internet access to do things like download the model or install packages during setup. This is handled by a NAT Gateway sitting in the public subnet - it lets private VMs initiate outbound connections to the internet, while blocking any unsolicited inbound traffic from reaching them.
+- SSH access is also locked down by design - VM-1 can be SSHed into directly from your local machine, and VM-2/VM-3 can only be SSHed into by going through VM-1 (acting as a jump/bastion host).
 
 ### Network Security
 
