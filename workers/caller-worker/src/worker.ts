@@ -21,7 +21,6 @@ iii.registerFunction(
   },
 );
 
-// --- Uncomment after: iii worker add iii-http ---
 iii.registerFunction(
   'http::run_inference_over_http',
   async (payload: { body: { messages: Record<string, any> } & Record<string, any> }) => {
