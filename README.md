@@ -154,12 +154,43 @@ docker push faizanfirdousi/iii-inference-worker:latest
 
 ## CI/CD
 
-A GitHub Actions workflow (`.github/workflows/docker-publish.yml`) automatically rebuilds Docker images on push to `main`:
+A GitHub Actions workflow automatically rebuilds and pushes Docker images whenever source code changes are pushed to `main`. The key design choice is **selective rebuilding** — instead of rebuilding all three images on every push, the pipeline detects which files changed and only rebuilds the image(s) that are actually affected.
 
-- Uses [dorny/paths-filter](https://github.com/dorny/paths-filter) to detect which source files changed
-- Only rebuilds the **affected image(s)** — e.g., editing `inference_worker.py` only rebuilds the inference worker
-- Docker layer caching via GitHub Actions cache for faster builds
-- Requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets
+### Pipeline Flow
+
+```
+Push to main
+    │
+    ▼
+Detect changed files (dorny/paths-filter)
+    │
+    ├── workers/caller-worker/** changed?  → rebuild iii-caller-worker
+    ├── workers/inference-worker/** changed? → rebuild iii-inference-worker
+    └── config.yaml / iii.lock changed?     → rebuild iii-engine
+    │
+    ▼
+Build with Docker Buildx + GitHub Actions layer cache
+    │
+    ▼
+Push updated image(s) to Docker Hub
+```
+
+### How It Works
+
+1. **Trigger** — The workflow runs only when a push to `main` modifies files under `workers/`, `docker/`, `config.yaml`, `iii.lock`, or `.iii/`. Changes to Terraform, docs, or the README do **not** trigger a build.
+
+2. **Change detection** — Uses [dorny/paths-filter](https://github.com/dorny/paths-filter) to compare the diff against path patterns for each image. This avoids wasting ~3 minutes rebuilding the 2.1 GB inference worker image when only the caller worker code changed.
+
+3. **Build & push** — Each image is built conditionally using `docker/build-push-action` with GitHub Actions cache (`type=gha`), so unchanged Docker layers are reused across runs.
+
+### Setup
+
+Add two repository secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub username |
+| `DOCKERHUB_TOKEN` | Docker Hub [Personal Access Token](https://app.docker.com/settings) (Read & Write) |
 
 ---
 
