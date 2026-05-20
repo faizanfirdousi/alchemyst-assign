@@ -152,9 +152,9 @@ docker push faizanfirdousi/iii-inference-worker:latest
 
 ---
 
-## CI/CD
+## Continuous Integration
 
-A GitHub Actions workflow automatically rebuilds and pushes Docker images whenever source code changes are pushed to `main`. The key design choice is **selective rebuilding** — instead of rebuilding all three images on every push, the pipeline detects which files changed and only rebuilds the image(s) that are actually affected.
+A GitHub Actions workflow handles the **CI pipeline** — automatically rebuilding and pushing Docker images whenever source code changes are pushed to `main`. The key design choice is **selective rebuilding** — instead of rebuilding all three images on every push, the pipeline detects which files changed and only rebuilds the image(s) that are actually affected.
 
 ### Pipeline Flow
 
