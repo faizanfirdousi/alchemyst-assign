@@ -1,0 +1,36 @@
+# VM1: API Gateway — iii Engine + Nginx
+# Deployed to PUBLIC subnet EC2 instance
+#
+# Usage: docker compose -f docker-compose.vm1.yml up -d
+
+services:
+  iii-engine:
+    image: ${DOCKERHUB_USER:-faizanfirdousi}/iii-engine:latest
+    container_name: iii-engine
+    ports:
+      - "3111:3111"   # iii-http API (nginx proxies to this)
+      - "49134:49134"  # RPC WebSocket (workers from VM2/VM3 connect here)
+    volumes:
+      - engine-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:3111/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    container_name: iii-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/engine/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      iii-engine:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  engine-data:

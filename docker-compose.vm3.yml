@@ -1,0 +1,13 @@
+# VM3: Inference Worker (Python + Qwen3-0.6B model)
+# Deployed to PRIVATE subnet EC2 instance
+#
+# Requires: ENGINE_IP env var set to VM1's private IP
+# Usage: ENGINE_IP=10.0.1.x docker compose -f docker-compose.vm3.yml up -d
+
+services:
+  inference-worker:
+    image: ${DOCKERHUB_USER:-faizanfirdousi}/iii-inference-worker:latest
+    container_name: iii-inference
+    environment:
+      - III_URL=ws://${ENGINE_IP:?Set ENGINE_IP to VM1 private IP}:49134
+    restart: unless-stopped

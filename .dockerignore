@@ -1,0 +1,36 @@
+# Version control
+.git
+.gitignore
+
+# Python artifacts
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+quickstart/workers/inference-worker/.venv
+quickstart/workers/inference-worker/__pycache__
+quickstart/workers/inference-worker/.pytest_cache
+
+# Node artifacts
+node_modules
+quickstart/workers/caller-worker/node_modules
+quickstart/workers/caller-worker/.next
+quickstart/workers/caller-worker/dist
+
+# Build artifacts
+quickstart/workers/*/target
+quickstart/workers/*/.next
+
+# IDE / OS
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Terraform (will add later)
+terraform/.terraform
+terraform/*.tfstate*
+
+# Old scripts (kept for reference, not needed in Docker)
+scripts/
