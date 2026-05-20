@@ -1,4 +1,4 @@
-# Distributed Inference System — DevOps Assignment
+# Distributed Inference System - DevOps Assignment
 
 A production-grade deployment of a distributed SLM (Small Language Model) inference system across multiple AWS EC2 instances. The system runs a **Qwen3-0.6B** model behind a worker mesh orchestrated by the [iii framework](https://iii.dev), exposed as a JSON HTTP API through an Nginx reverse proxy.
 
